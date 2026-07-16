@@ -15,14 +15,11 @@ proc getCacheDir(): string =
 # Generates a reproducible filename based on command and instructions
 proc getCachePath(command, instruction: string): string =
   let cacheDir = getCacheDir()
-  # Ensure the cache folder exists
   createDir(cacheDir)
   
   if instruction == "":
-    # Clean default filename for the plain command
     return cacheDir / (command & ".txt")
   else:
-    # Hash the instructions to handle variations safely
     let h = hash(instruction)
     return cacheDir / (command & "_" & $abs(h) & ".txt")
 
@@ -76,15 +73,16 @@ proc loadConfig(): Config =
 
   return Config(api: api, key: key, model: model)
 
-# Parse command line parameters manually
-proc parseArgs(): tuple[cmd: string, instruction: string] =
+# Parse command line parameters manually, including the redo flag
+proc parseArgs(): tuple[cmd: string, instruction: string, redo: bool] =
   let params = commandLineParams()
   if params.len == 0:
-    echo "Usage: what <command> [-i \"custom instructions/questions\"]"
+    echo "Usage: what <command> [-i \"custom instructions/questions\"] [-r | --redo]"
     quit(0)
 
   var cmd = ""
   var instruction = ""
+  var redo = false
   var i = 0
   while i < params.len:
     let arg = params[i]
@@ -95,6 +93,9 @@ proc parseArgs(): tuple[cmd: string, instruction: string] =
       else:
         echo "Error: Missing value for instruction parameter " & arg
         quit(1)
+    elif arg == "-r" or arg == "--redo":
+      redo = true
+      i += 1
     else:
       if cmd == "":
         cmd = arg
@@ -102,10 +103,10 @@ proc parseArgs(): tuple[cmd: string, instruction: string] =
 
   if cmd == "":
     echo "Error: No command specified."
-    echo "Usage: what <command> [-i \"custom instructions/questions\"]"
+    echo "Usage: what <command> [-i \"custom instructions/questions\"] [-r | --redo]"
     quit(1)
 
-  return (cmd, instruction)
+  return (cmd, instruction, redo)
 
 # Query the OpenAI-compatible endpoint
 proc queryAI(config: Config, manPage: string, command: string, instruction: string): string =
@@ -122,15 +123,15 @@ proc queryAI(config: Config, manPage: string, command: string, instruction: stri
     else:
       endpoint &= "/chat/completions"
 
-  let systemPrompt = "You are a concise command-line helper. Your job is to format and summarize man page entries into clear, practical guides for proper usage along with highly actionable examples and important information."
+  let systemPrompt = "You are a concise command-line helper. Your job is to format and summarize man page entries into clear, practical markdown guides with highly actionable examples."
   
   var truncatedMan = manPage
   if truncatedMan.len > 100_000:
     truncatedMan = truncatedMan[0..100_000] & "\n... [truncated due to size] ..."
 
-  var userPrompt = "Here is the raw man page text for the command '" & command & "'(may be truncated):\n\n"
+  var userPrompt = "Here is the raw man page text for the command '" & command & "':\n\n"
   userPrompt &= truncatedMan & "\n\n"
-  userPrompt &= "Provide a succinct summary of this command, prioritizing the most common use-cases and most commonly used flags. Show direct, practical examples."
+  userPrompt &= "Provide a succinct summary of this command, prioritizing the most common use-cases and associated flags. Show direct, practical examples."
 
   if instruction != "":
     userPrompt &= "\n\nAdditional Instruction/Question from user:\n" & instruction
@@ -160,21 +161,20 @@ proc queryAI(config: Config, manPage: string, command: string, instruction: stri
 
 # Main Execution Flow
 proc main() =
-  let (command, instruction) = parseArgs()
+  let (command, instruction, redo) = parseArgs()
   
-  # 1. Search Cache First
+  # 1. Search Cache First (Bypassed if 'redo' is true)
   let cachePath = getCachePath(command, instruction)
-  if fileExists(cachePath):
+  if fileExists(cachePath) and not redo:
     try:
       let cachedSummary = readFile(cachePath)
-      echo "Using cached page."
+      echo "Using cached response. Use -r (--redo) to create a new one."
       echo cachedSummary
       return
     except IOError as e:
       echo "Warning: Cache file exists but could not be read: ", e.msg
-      # Continue to fetch online if reading failed
 
-  # 2. Cache Miss: Run standard logic
+  # 2. Cache Miss or Redo: Run standard logic
   let config = loadConfig()
   
   echo "Fetching man page for '" & command & "'..."
@@ -183,7 +183,7 @@ proc main() =
   echo "Analyzing with " & config.model & "..."
   let summary = queryAI(config, manPage, command, instruction)
   
-  # 3. Save response for future runs
+  # 3. Save response (overwrites previous cache file if it exists)
   try:
     writeFile(cachePath, summary)
   except IOError as e:
