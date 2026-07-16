@@ -1,4 +1,4 @@
-import std/[os, osproc, strutils, httpclient, json]
+import std/[os, osproc, strutils, httpclient, json, hashes]
 
 type
   Config = object
@@ -6,9 +6,28 @@ type
     key: string
     model: string
 
+# Helper to determine the standard cache directory
+proc getCacheDir(): string =
+  let xdgCache = getEnv("XDG_CACHE_HOME")
+  let base = if xdgCache != "": xdgCache else: getHomeDir() / ".cache"
+  return base / "what"
+
+# Generates a reproducible filename based on command and instructions
+proc getCachePath(command, instruction: string): string =
+  let cacheDir = getCacheDir()
+  # Ensure the cache folder exists
+  createDir(cacheDir)
+  
+  if instruction == "":
+    # Clean default filename for the plain command
+    return cacheDir / (command & ".txt")
+  else:
+    # Hash the instructions to handle variations safely
+    let h = hash(instruction)
+    return cacheDir / (command & "_" & $abs(h) & ".txt")
+
 # Retrieve and clean the man page text
 proc getManPage(cmd: string): string =
-  # Using 'man' piped through 'col -b' to strip backspace formatting and special characters
   let shellCmd = "man " & quoteShell(cmd) & " | col -b"
   let (output, exitCode) = execCmdEx(shellCmd)
   
@@ -96,7 +115,6 @@ proc queryAI(config: Config, manPage: string, command: string, instruction: stri
     "Authorization": "Bearer " & config.key
   })
 
-  # Handle base URL vs direct completions endpoint
   var endpoint = config.api
   if not endpoint.endsWith("/chat/completions"):
     if endpoint.endsWith("/"):
@@ -104,17 +122,15 @@ proc queryAI(config: Config, manPage: string, command: string, instruction: stri
     else:
       endpoint &= "/chat/completions"
 
-  # System/User Prompts
-  let systemPrompt = "You are a concise command-line helper. Your job is to format and summarize man page entries into clear, practical markdown guides with highly actionable examples."
+  let systemPrompt = "You are a concise command-line helper. Your job is to format and summarize man page entries into clear, practical guides for proper usage along with highly actionable examples and important information."
   
-  # Limit input size to avoid excessive token usage on massive man pages
   var truncatedMan = manPage
   if truncatedMan.len > 100_000:
     truncatedMan = truncatedMan[0..100_000] & "\n... [truncated due to size] ..."
 
-  var userPrompt = "Here is the raw man page text for the command '" & command & "':\n\n"
+  var userPrompt = "Here is the raw man page text for the command '" & command & "'(may be truncated):\n\n"
   userPrompt &= truncatedMan & "\n\n"
-  userPrompt &= "Provide a succinct summary of this command, prioritizing the most common use-cases and associated flags. Show direct, practical examples."
+  userPrompt &= "Provide a succinct summary of this command, prioritizing the most common use-cases and most commonly used flags. Show direct, practical examples."
 
   if instruction != "":
     userPrompt &= "\n\nAdditional Instruction/Question from user:\n" & instruction
@@ -145,6 +161,20 @@ proc queryAI(config: Config, manPage: string, command: string, instruction: stri
 # Main Execution Flow
 proc main() =
   let (command, instruction) = parseArgs()
+  
+  # 1. Search Cache First
+  let cachePath = getCachePath(command, instruction)
+  if fileExists(cachePath):
+    try:
+      let cachedSummary = readFile(cachePath)
+      echo "Using cached page."
+      echo cachedSummary
+      return
+    except IOError as e:
+      echo "Warning: Cache file exists but could not be read: ", e.msg
+      # Continue to fetch online if reading failed
+
+  # 2. Cache Miss: Run standard logic
   let config = loadConfig()
   
   echo "Fetching man page for '" & command & "'..."
@@ -153,6 +183,12 @@ proc main() =
   echo "Analyzing with " & config.model & "..."
   let summary = queryAI(config, manPage, command, instruction)
   
+  # 3. Save response for future runs
+  try:
+    writeFile(cachePath, summary)
+  except IOError as e:
+    echo "Warning: Could not save the response to cache: ", e.msg
+
   echo "\n--- Summary for: " & command & " ---\n"
   echo summary
 
