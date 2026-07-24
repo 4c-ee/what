@@ -25,10 +25,12 @@ proc getCachePath(command, instruction: string): string =
 
 # Retrieve and clean the man page text
 proc getManPage(cmd: string): string =
-  let shellCmd = "man " & quoteShell(cmd) & " | col -b"
+  # Redirect stderr to /dev/null so failure messages aren't treated as stdout text
+  let shellCmd = "man " & quoteShell(cmd) & " 2>/dev/null | col -b"
   let (output, exitCode) = execCmdEx(shellCmd)
   
-  if exitCode != 0:
+  # Exit if command fails or if output is empty
+  if exitCode != 0 or output.strip() == "":
     echo "Error: Could not find or read the man page for '" & cmd & "'."
     echo "Make sure the command is installed and has a manual entry."
     quit(1)
