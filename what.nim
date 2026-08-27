@@ -133,7 +133,7 @@ proc queryAI(config: Config, manPage: string, command: string, instruction: stri
 
   var userPrompt = "Here is the raw man page text for the command '" & command & "':\n\n"
   userPrompt &= truncatedMan & "\n\n"
-  userPrompt &= "Provide a succinct summary of this command, prioritizing the most common use-cases and associated flags. Show direct, practical examples."
+  userPrompt &= "Provide a succinct summary of this command, prioritizing the most common use-cases and associated flags. Show direct, practical examples. Rely on the man page, rather than your own knowledge."
 
   if instruction != "":
     userPrompt &= "\n\nAdditional Instruction/Question from user:\n" & instruction
