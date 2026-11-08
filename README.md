@@ -31,8 +31,9 @@ I think you need these two packages: `openssl` and `man`. Pretty sure. Maybe. I 
 
 ## Disclaimers
 
+**This entire tool is 100% vibecode, one(-ish)-shotted with Gemini. I did not make this, Gemini did.**
+
 It doesn't render markdown so you just get to read it with \* and \` and \# everywhere. Sorry.
 
 The prompt is baked into the tool but if you wanna just modify the prompt and build it yourself you can.
 
-**I one(-ish)-shotted this with Gemini. I did not make this, Gemini did.**
